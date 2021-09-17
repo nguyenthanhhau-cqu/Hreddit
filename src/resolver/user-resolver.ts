@@ -3,6 +3,8 @@ import { Arg, Ctx, Field, InputType, Mutation, ObjectType, Query, Resolver } fro
 import { User } from "../entities/User";
 import * as argon2 from "argon2";
 
+
+
 @ObjectType()
 export class ErrorType {
     @Field()
@@ -10,6 +12,7 @@ export class ErrorType {
     @Field()
     errorMessage: string
 }
+
 
 @ObjectType()
 export class UserRespond {
@@ -32,6 +35,18 @@ export class UserInput {
 
 @Resolver()
 export class UserResolver {
+
+    @Query(() => User, { nullable: true })
+    async me(
+        @Ctx() { em, req }: MyConText
+    ) {
+        if (!req.session.userId) {
+            return null
+        }
+        const user = await em.findOne(User, { id: req.session.userId })
+        return user;
+    }
+
     @Mutation(() => UserRespond)
     async register(
         @Arg("options") options: UserInput,
@@ -49,21 +64,32 @@ export class UserResolver {
             return {
                 errors: [{
                     fieldName: "password",
-                    errorMessage: "Your user name must greater then 3 character"
+                    errorMessage: "Your password must greater then 3 character"
                 }]
             }
         }
         const hashPassWord = await argon2.hash(options.passWord)
         const user = ctx.em.create(User, { userName: options.userName, passWord: hashPassWord })
-        await ctx.em.persistAndFlush(user)
+        try {
+            await ctx.em.persistAndFlush(user)
+        } catch (err) {
+            if (err.code == "23505") {// error for unique constraint
+                return {
+                    errors: [{
+                        fieldName: "user name",
+                        errorMessage: "The user name already taken"
+                    }]
+                };
+            }
+        }
         return { user }
     }
     @Mutation(() => UserRespond)
     async login(
         @Arg("options") options: UserInput,
-        @Ctx() ctx: MyConText
+        @Ctx() { req, res, em }: MyConText
     ): Promise<UserRespond> {
-        const user = await ctx.em.findOne(User, { userName: options.userName })
+        const user = await em.findOne(User, { userName: options.userName })
         if (!user) {
             return {
                 errors: [
@@ -85,6 +111,11 @@ export class UserResolver {
                 ]
             }
         }
+
+        req.session.userId = user.id
+
+        console.log(req.session.userId)
+
 
         return { user }
     }
