@@ -5,6 +5,7 @@ import * as argon2 from "argon2";
 
 
 
+
 @ObjectType()
 export class ErrorType {
     @Field()
@@ -37,20 +38,19 @@ export class UserInput {
 export class UserResolver {
 
     @Query(() => User, { nullable: true })
-    async me(
-        @Ctx() { em, req }: MyConText
-    ) {
+    me(@Ctx() { req, em }: MyConText) {
+        // you are not logged in
         if (!req.session.userId) {
-            return null
+            return null;
         }
-        const user = await em.findOne(User, { id: req.session.userId })
-        return user;
+        const user = em.findOne(User, { id: req.session.userId })
+        return user
     }
 
     @Mutation(() => UserRespond)
     async register(
         @Arg("options") options: UserInput,
-        @Ctx() ctx: MyConText
+        @Ctx() { req, res, em }: MyConText
     ): Promise<UserRespond> {
         if (options.userName.length <= 2) {
             return {
@@ -69,9 +69,9 @@ export class UserResolver {
             }
         }
         const hashPassWord = await argon2.hash(options.passWord)
-        const user = ctx.em.create(User, { userName: options.userName, passWord: hashPassWord })
+        const user = em.create(User, { userName: options.userName, passWord: hashPassWord })
         try {
-            await ctx.em.persistAndFlush(user)
+            await em.persistAndFlush(user)
         } catch (err) {
             if (err.code == "23505") {// error for unique constraint
                 return {
@@ -82,12 +82,14 @@ export class UserResolver {
                 };
             }
         }
+        req.session.userId = user.id
+
         return { user }
     }
     @Mutation(() => UserRespond)
     async login(
         @Arg("options") options: UserInput,
-        @Ctx() { req, res, em }: MyConText
+        @Ctx() { req, em }: MyConText
     ): Promise<UserRespond> {
         const user = await em.findOne(User, { userName: options.userName })
         if (!user) {
@@ -111,12 +113,24 @@ export class UserResolver {
                 ]
             }
         }
-
         req.session.userId = user.id
-
-        console.log(req.session.userId)
-
-
         return { user }
+    }
+
+    @Mutation(() => Boolean)
+    async logout(
+        @Ctx() { req, res }: MyConText
+    ) {
+        return new Promise((resolver) => {
+            req.session.destroy(err => {
+                res.clearCookie("qid");
+                if (err) {
+                    console.log(err)
+                    resolver(false);
+                    return
+                }
+                resolver(true)
+            })
+        })
     }
 }

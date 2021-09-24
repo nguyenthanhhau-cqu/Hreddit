@@ -7,17 +7,11 @@ import { ApolloServer } from "apollo-server-express"
 import { buildSchema } from "type-graphql";
 import { PostResolver } from "./resolver/postResolver"
 import { UserResolver } from "./resolver/user-resolver"
-
+import cors from "cors"
 import redis from 'redis'
 import connectRedis from "connect-redis"
-import { MyConText } from "./types"
-import session from 'express-session'
+import Session from 'express-session'
 
-declare module 'express-session' {
-    interface Session {
-        userId: number;
-    }
-}
 
 
 
@@ -26,23 +20,32 @@ const main = async () => {
     const orm = await MikroORM.init(mikroOrmConfig);
     await orm.getMigrator().up();
     const app = express()
-    let RedisStore = connectRedis(session)
+    let RedisStore = connectRedis(Session)
     let redisClient = redis.createClient()
+    app.set("trust proxy", 1);
+
+
+    app.use(cors({
+        origin: "http://localhost:3000",
+        credentials: true
+    }))
+
     app.use(
-        session({
+        Session({
             name: "qid",
-            store: new RedisStore({ client: redisClient, disableTouch: false }),
+            store: new RedisStore({ client: redisClient, disableTouch: false, }),
             saveUninitialized: false,
             cookie: {
                 maxAge: 1000 * 60 * 60 * 24 * 365 * 10,
                 httpOnly: true,
-                secure: __prod__,
+                secure: !__prod__,
                 sameSite: 'lax', //csrf
             },
             secret: 'asdfasdfasdfasdfasdfasdfasdf',
             resave: false,
-
         }),
+
+
 
 
     )
@@ -54,16 +57,19 @@ const main = async () => {
             validate: false
 
         }),
-
-        context: ({ req, res }): MyConText => ({ //context can be accessible by any Resolver
+        context: ({ req, res }): any => ({ //context can be accessible by any Resolver
             em: orm.em,
             req,
             res
         }),
 
     })
+
+
     await server.start()
-    server.applyMiddleware({ app });
+    server.applyMiddleware({ app, cors: false });
+
+
     app.listen(4000, () => {
         console.log("this server is running")
     })
